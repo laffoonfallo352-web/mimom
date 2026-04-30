@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>AI 宇宙实验室 - 公式修复版</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root { --bg: #090b10; --side: #12161e; --accent: #58a6ff; --text: #c9d1d9; }
+        body { margin: 0; background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; display: flex; height: 100vh; overflow: hidden; }
+        #sidebar { width: 380px; background: var(--side); border-right: 1px solid #30363d; padding: 20px; display: flex; flex-direction: column; overflow-y: auto; z-index: 10; }
+        .nav-btn { background: #21262d; border: 1px solid #30363d; color: white; padding: 12px; margin-bottom: 8px; border-radius: 6px; cursor: pointer; text-align: left; transition: 0.2s; }
+        .nav-btn.active { border-color: var(--accent); background: #1f2937; color: var(--accent); }
+        .control-panel { background: #0d1117; padding: 15px; border-radius: 8px; margin-top: 10px; border: 1px solid #30363d; }
+        label { display: block; font-size: 0.85em; margin-bottom: 5px; color: #8b949e; margin-top: 10px; }
+        input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; }
+        #main { flex-grow: 1; display: flex; flex-direction: column; padding: 20px; overflow: hidden; position: relative; }
+        #canvas-container { flex-grow: 1; position: relative; min-height: 0; }
+        canvas#renderCanvas { background: #000; border-radius: 12px; border: 1px solid #333; display: block; }
+        #analysis { height: 160px; margin-top: 15px; background: rgba(255,255,255,0.03); border-radius: 10px; padding: 10px; flex-shrink: 0; }
+        .edu-info { font-size: 0.85em; line-height: 1.5; color: #8b949e; background: #23863615; padding: 10px; border-left: 4px solid #238636; border-radius: 4px; margin-top: 15px; }
+        .data-monitor { position: absolute; top: 20px; right: 20px; background: rgba(0,0,0,0.85); padding: 15px; border-radius: 8px; border: 1px solid #444; font-family: 'Consolas', monospace; font-size: 0.78em; min-width: 230px; pointer-events: none; box-shadow: 0 4px 20px rgba(0,0,0,0.6); }
+        .data-row { display: flex; justify-content: space-between; margin-bottom: 4px; border-bottom: 1px solid #222; padding-bottom: 2px; }
+        .val { color: #58a6ff; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div id="sidebar">
+    <h2 style="margin:0 0 10px 0">🌌 AI 宇宙计算实验室</h2>
+    <button class="nav-btn active" id="btn-reg" onclick="switchTab('reg', this)">📈 回归：轨道演化</button>
+    <button class="nav-btn" onclick="switchTab('cls', this)">🎯 分类：存活判定</button>
+    <button class="nav-btn" onclick="switchTab('clu', this)">🧩 聚类：星系共振</button>
+    <div class="control-panel" id="controls"></div>
+    <div class="edu-info"><b>AI 计算内核：</b> <span id="concept-msg">初始化中...</span></div>
+</div>
+
+<div id="main">
+    <div id="canvas-container">
+        <canvas id="renderCanvas"></canvas>
+        <div class="data-monitor">
+            <div style="color: #8b949e; margin-bottom: 10px; font-weight: bold; border-bottom: 1px solid #444;">AI 实时计算流</div>
+            <div id="monitor-content"></div>
+        </div>
+    </div>
+    <div id="analysis">
+        <canvas id="dataChart"></canvas>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('renderCanvas');
+    const ctx = canvas.getContext('2d');
+    const container = document.getElementById('canvas-container');
+    const monitor = document.getElementById('monitor-content');
+    let currentTab = 'reg';
+    let chart;
+
+    let params = { 
+        g: 6.67, mass: 600, radius: 180, vel: 5.0, lr: 1.0, noise: 0,
+        threshold: 180, bias: 0, sharpness: 1.5,
+        k: 3, step: 1.0
+    };
+
+    let planet = { x: 180, y: 0, vx: 0, vy: 5, history: [] };
+    let aiPredict = 180;
+    let asteroids = [];
+    let clusters = [];
+
+    function resize() { canvas.width = container.clientWidth; canvas.height = container.clientHeight; }
+    window.addEventListener('resize', resize); resize();
+
+    function switchTab(tab, btn) {
+        currentTab = tab;
+        document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        initUI();
+        resetSim();
+        document.getElementById('analysis').style.display = (tab === 'reg') ? 'block' : 'none';
+        resize();
+    }
+
+    function initUI() {
+        const c = document.getElementById('controls');
+        if (currentTab === 'reg') {
+            // 💡 修复后的公式显示逻辑
+            document.getElementById('concept-msg').innerHTML = "回归演示：AI 学习物理公式 <b>F = G · (M·m) / r²</b>。Loss 越小，预测越精准。";
+            c.innerHTML = `
+                <label>中心质量 (Mass M): <b id="v_mass">${params.mass}</b></label>
+                <input type="range" min="100" max="2000" step="10" value="${params.mass}" oninput="updateParam('mass', this.value)">
+                <label>初始半径 (Radius R): <b id="v_radius">${params.radius}</b></label>
+                <input type="range" min="50" max="350" step="1" value="${params.radius}" oninput="updateParam('radius', this.value)">
+                <label>切向速度 (Velocity V): <b id="v_vel">${params.vel}</b></label>
+                <input type="range" min="1" max="12" step="0.1" value="${params.vel}" oninput="updateParam('vel', this.value)">
+                <label>引力权重 (Gravity G): <b id="v_g">${params.g}</b></label>
+                <input type="range" min="1" max="30" step="0.1" value="${params.g}" oninput="updateParam('g', this.value)">
+                <hr style="border:0.1px solid #333; margin:15px 0">
+                <label>回归学习率 (LR): <b id="v_lr">${params.lr}</b></label>
+                <input type="range" min="0.1" max="5" step="0.1" value="${params.lr}" oninput="updateParam('lr', this.value)">
+                <label>传感器噪声 (Noise): <b id="v_noise">${params.noise}</b></label>
+                <input type="range" min="0" max="50" step="1" value="${params.noise}" oninput="updateParam('noise', this.value)">
+            `;
+        } else if (currentTab === 'cls') {
+            document.getElementById('concept-msg').innerText = "分类演示：基于逻辑回归的生存判定。虚线为 AI 脑中的决策边界。";
+            c.innerHTML = `
+                <label>决策阈值 (Radius): <b id="v_threshold">${params.threshold}</b></label>
+                <input type="range" min="50" max="400" step="1" value="${params.threshold}" oninput="updateParam('threshold', this.value)">
+                <label>判定偏置 (Bias): <b id="v_bias">${params.bias}</b></label>
+                <input type="range" min="-100" max="100" step="1" value="${params.bias}" oninput="updateParam('bias', this.value)">
+                <label>判定锐度 (Sharpness): <b id="v_sharpness">${params.sharpness}</b></label>
+                <input type="range" min="0.1" max="5" step="0.1" value="${params.sharpness}" oninput="updateParam('sharpness', this.value)">
+            `;
+        } else {
+            document.getElementById('concept-msg').innerText = "聚类演示：无监督学习。根据欧氏距离自动将数据归于‘最相似’的簇。";
+            c.innerHTML = `
+                <label>星系数量 (K): <b id="v_k">${params.k}</b></label>
+                <input type="range" min="2" max="6" step="1" value="${params.k}" oninput="updateParam('k', this.value)">
+                <label>演化速度 (Step): <b id="v_step">${params.step}</b></label>
+                <input type="range" min="0.1" max="3" step="0.1" value="${params.step}" oninput="updateParam('step', this.value)">
+            `;
+        }
+    }
+
+    function updateParam(key, val) {
+        params[key] = parseFloat(val);
+        document.getElementById('v_' + key).innerText = val;
+        if(['mass','radius','vel','g','k'].includes(key)) resetSim();
+    }
+
+    function resetSim() {
+        planet.x = params.radius; planet.y = 0; planet.vx = 0; planet.vy = params.vel;
+        planet.history = []; aiPredict = planet.x;
+        asteroids = Array.from({length: 500}, () => ({ 
+            x: (Math.random()-0.5)*750, y: (Math.random()-0.5)*600, vx: 0, vy: 0 
+        }));
+        if(currentTab === 'clu') {
+            clusters = Array.from({length: params.k}, (v, i) => ({
+                x: Math.cos(i)*200, y: Math.sin(i)*200, col: `hsl(${i*(360/params.k)}, 70%, 60%)`
+                
+            }));
+        }
+    }
+
+    function draw() {
+        const sunPos = { x: canvas.width/2, y: canvas.height/2 };
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.save(); ctx.translate(sunPos.x, sunPos.y);
+
+        if (currentTab === 'reg') {
+            let d = Math.sqrt(planet.x**2 + planet.y**2);
+            if(d < 20 || d > 1200) resetSim();
+            let f = (params.g * params.mass) / (d * d);
+            planet.vx -= (planet.x/d) * f; planet.vy -= (planet.y/d) * f;
+            planet.x += planet.vx; planet.y += planet.vy;
+            let actualWithNoise = planet.x + (Math.random()-0.5) * params.noise;
+            let error = actualWithNoise - aiPredict;
+            aiPredict += error * (0.05 * params.lr);
+            drawBody(planet.x, planet.y, 13, "#58a6ff", "");
+            updateChart(planet.x, aiPredict);
+            monitor.innerHTML = `
+                <div class="data-row"><span>Center Mass:</span><span class="val">${params.mass}</span></div>
+                <div class="data-row"><span>Planet X:</span><span class="val">${planet.x.toFixed(2)}</span></div>
+                <div class="data-row"><span>AI Predict:</span><span class="val" style="color:#f85149">${aiPredict.toFixed(2)}</span></div>
+                <div class="data-row"><span>L1 Loss:</span><span class="val">${Math.abs(error).toFixed(4)}</span></div>
+            `;
+        } else if (currentTab === 'cls') {
+            // 1. 先设置虚线和发光样式
+            ctx.setLineDash([5, 5]);
+            ctx.shadowBlur = 30;
+            ctx.shadowColor = "#ffffff";
+            ctx.strokeStyle = "rgba(255,255,255,0.5)";
+
+            // 2. 开始绘制圆圈
+            ctx.beginPath();
+            ctx.arc(0, 0, params.threshold, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // 3. 立刻重置状态，保证后面的星星不发光、不是虚线
+            ctx.setLineDash([]);
+            ctx.shadowBlur = 0;
+            let correct = 0;
+            asteroids.forEach(a => {
+                let dist = Math.sqrt(a.x**2 + a.y**2);
+                let logit = (params.threshold - dist) * params.sharpness + params.bias;
+                let prob = 1 / (1 + Math.exp(-logit/20));
+                let isSafe = prob > 0.5;
+                if(isSafe === (dist < params.threshold)) correct++;
+                drawBody(a.x, a.y, 1.5, isSafe ? "#238636" : "#f85149", `P:${prob.toFixed(2)}`);
+            });
+            monitor.innerHTML = `
+                <div class="data-row"><span>Boundary:</span><span class="val">${params.threshold}</span></div>
+                <div class="data-row"><span>Bias:</span><span class="val">${params.bias}</span></div>
+                <div class="data-row"><span>Accuracy:</span><span class="val">${(correct/asteroids.length*100).toFixed(1)}%</span></div>
+            `;
+        } else if (currentTab === 'clu') {
+            let totalInertia = 0;
+            // 1. 先计算星星的移动，并画出星星和细连线
+            asteroids.forEach(a => {
+                let ds = clusters.map(c => Math.sqrt((a.x-c.x)**2+(a.y-c.y)**2));
+                let bestIdx = ds.indexOf(Math.min(...ds));
+                let target = clusters[bestIdx];
+
+                // 行星演化逻辑
+                a.vx += (target.x - a.x) * 0.002 * params.step;
+                a.vy += (target.y - a.y) * 0.002 * params.step;
+                a.vx *= 0.94; a.vy *= 0.94; a.x += a.vx; a.y += a.vy;
+                totalInertia += ds[bestIdx]**2;
+
+                // 画星星（1.5 比较细腻）
+                drawBody(a.x, a.y, 1.5, target.col, "");
+
+                // 画引力连线
+                ctx.strokeStyle = target.col;
+                ctx.globalAlpha = 0.15;
+                ctx.beginPath();
+                ctx.moveTo(a.x, a.y);
+                ctx.lineTo(target.x, target.y);
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+            });
+
+            // 2. 画发光星系中心
+            clusters.forEach(c => {
+                ctx.strokeStyle = c.col;
+                ctx.lineWidth = 3;
+                ctx.shadowBlur = 40;
+                ctx.shadowColor = c.col;
+
+                ctx.beginPath();
+                ctx.arc(c.x, c.y, 25, 0, Math.PI * 2);
+                ctx.stroke();
+
+                // 画完立刻重置，不影响下一帧
+                ctx.shadowBlur = 0;
+                ctx.lineWidth = 1;
+            });
+
+            // 3. 更新数据监测看板
+            monitor.innerHTML = `
+                <div class="data-row"><span>Clusters K:</span><span class="val">${params.k}</span></div>
+                <div class="data-row"><span>Inertia:</span><span class="val">${(totalInertia/1000).toFixed(2)}k</span></div>
+                <div class="data-row"><span>Converging:</span><span class="val">TRUE</span></div>
+            `;
+        }
+
+        ctx.shadowBlur = 20; ctx.shadowColor = "#fc0";
+        ctx.fillStyle = "#fc0"; ctx.beginPath(); ctx.arc(0, 0, 35, 0, Math.PI*2); ctx.fill();
+        ctx.restore();
+        requestAnimationFrame(draw);
+    }
+
+    function drawBody(x, y, r, col, label) {
+        ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
+        if(label) { ctx.fillStyle = "rgba(255,255,255,0.4)"; ctx.font = "8px monospace"; ctx.fillText(label, x + 8, y + 4); }
+    }
+
+    function initChart() {
+        const c = document.getElementById('dataChart').getContext('2d');
+        chart = new Chart(c, {
+            type: 'line', data: { labels: [], datasets: [
+                { label: '实际', borderColor: '#58a6ff', data: [], borderWidth: 1.5, pointRadius: 0, fill: false },
+                { label: 'AI预测', borderColor: '#f85149', data: [], borderDash: [5, 5], borderWidth: 1.5, pointRadius: 0, fill: false }
+            ]},
+            options: { responsive: true, maintainAspectRatio: false, animation: false,
+                scales: { x: { display: false }, y: { grid: { color: '#222' }, ticks: { color: '#555' } } },
+                plugins: { legend: { labels: { color: '#888', font: { size: 10 } } } }
+            }
+        });
+    }
+    function updateChart(a, p) {
+        if(!chart || currentTab !== 'reg') return;
+        chart.data.labels.push(""); chart.data.datasets[0].data.push(a); chart.data.datasets[1].data.push(p);
+        if(chart.data.labels.length > 50) { chart.data.labels.shift(); chart.data.datasets[0].data.shift(); chart.data.datasets[1].data.shift(); }
+        chart.update();
+    }
+
+    initUI(); initChart(); resetSim(); draw();
+</script>
+</body>
+</html>
